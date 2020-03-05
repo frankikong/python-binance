@@ -1,0 +1,204 @@
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.offline import plot
+from binance.client import Client
+from pyti.smoothed_moving_average import smoothed_moving_average as sma
+import time
+import statistics
+
+
+
+
+
+
+class Trader:
+#Cette classe est un robot trader sur binance
+
+
+
+    def __init__(self, api_key, secret_key, coin = "COTIBTC"):  
+        #permet de se connecter avec l'api key oklm et de définir de nombreux attributs
+        
+
+
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.coin = coin
+        self.pointAchat = []
+        self.pointVente = []
+
+        
+        
+        #On se connecte
+        self.client = Client(self.api_key, self.secret_key)
+        print("Connected")
+
+        
+
+        #Récupération des chandeliers japonais
+        data = self.client.get_klines(symbol= self.coin, interval=Client.KLINE_INTERVAL_1MINUTE)
+        self.candles = pd.DataFrame(data)
+
+
+
+        #on réorganise un peu les données
+        self.candles = self.candles.drop([5, 6, 7, 8, 9, 10, 11], axis = 1)
+        self.candles.columns = ["Temps","Ouverture", "High", "Low", "Fermeture"]
+
+
+
+
+        #on change les valeurs en chiffre
+        for col in self.candles.columns:
+
+            self.candles[col] = self.candles[col].astype(float)
+
+        
+
+
+        #calcul de l'ecart type
+        self.ecart_type = statistics.pstdev(self.candles["Fermeture"])
+        print(self.ecart_type)
+
+        
+
+        #on ajoute la moyenne mobile au tableau
+        self.candles["MM"] = sma(self.candles["Fermeture"].tolist(), 1)
+        self.candles["MM1"] = sma(self.candles["Fermeture"].tolist(), 2)
+
+
+        #on ajoute les bandes de bollinger, d'abord la bande haute puis la bande basse
+        i = 1
+        while i < len(self.candles["MM"]):
+
+            self.candles["Bol haut"] = self.candles["MM"] + self.ecart_type * 2
+            self.candles["Bol bas"] = self.candles["MM"] - self.ecart_type * 2
+
+            i = i + 1
+        
+        
+
+
+        #on ajoute les points d'achat et de vente
+        for i in range(1, len(self.candles["Low"])):
+            
+            if  self.candles["MM"][i] > self.candles["Low"][i] and self.candles["MM"][i] - self.candles["Low"][i] > 0.01 * self.candles["Low"][i]:
+                
+                if i > 10 and self.candles["Fermeture"][i-10] < self.candles["Fermeture"][i]:
+
+                    if self.candles["MM"][i] > self.candles["MM1"][i]:
+                        self.pointAchat.append([self.candles["Temps"][i], self.candles["Low"][i]])
+
+            
+
+
+    def getStatus(self):
+        #donne le statut de la connexion
+
+        return self.status
+
+
+
+
+    
+    def getPrice(self):
+        #permet de donner le prix de la coin 
+
+        self.price = self.client.get_avg_price(symbol=self.coin)
+        return self.price
+
+
+
+
+    
+    def getCandles(self):
+        #permet de donner les chandeliers
+
+        return self.candles
+
+             
+
+
+    
+    def plotCandles(self):
+        #permet de faire un graphique avec les candlesticks
+        
+        candle = go.Candlestick(
+            x = self.candles["Temps"],
+            open = self.candles["Ouverture"],
+            close = self.candles["Fermeture"],
+            high = self.candles["High"],
+            low = self.candles["Low"],
+            name = "Candlesticks")
+
+
+        ssma = go.Scatter(
+            x = self.candles["Temps"],
+            y = self.candles["MM"],
+            name = "Moyenne Mobile Rapide")
+
+
+        ssma1 = go.Scatter(
+            x = self.candles["Temps"],
+            y = self.candles["MM1"],
+            name = "Moyenne Mobile Lente")
+
+
+        
+        achats = go.Scatter(
+            x = [item[0] for item in self.pointAchat],
+            y = [item[1] for item in self.pointAchat],
+            name = "Points d'achat",
+            mode = "markers")
+
+
+        ventes = go.Scatter(
+            x = [item[0] for item in self.pointAchat],
+            y = [item[1] * 1.01 for item in self.pointAchat],
+            name = "Points de vente",
+            mode = "markers")
+
+        
+        bolhaut = go.Scatter(
+            x = self.candles["Temps"],
+            y = self.candles["Bol haut"],
+            name = "Bollinger haut")
+
+
+        bolbas = go.Scatter(
+            x = self.candles["Temps"],
+            y = self.candles["Bol bas"],
+            name = "Bollinger bas")
+
+
+        data = [candle, ssma, ssma1,achats, ventes, bolhaut, bolbas]
+
+                
+        #le Layout du grapgique
+        layout = go.Layout(title = self.coin)
+        fig = go.Figure(data = data, layout = layout)
+
+
+        #on trace
+        plot(fig, filename = self.coin )
+
+
+
+
+
+
+
+"""
+
+You have to create your own binance API to run this programm
+
+"""
+
+
+api_key = "XXXX"
+secret_key = "XXXX"
+trader = Trader(api_key, secret_key)
+print(trader.getCandles())
+trader.plotCandles()
+
